@@ -1,4 +1,4 @@
-use cosmic::{cosmic_theme, iced::Alignment, theme, widget, Element, Task};
+use cosmic::{Element, Task, cosmic_theme, iced::Alignment, theme, widget};
 
 use crate::{fl, page};
 
@@ -10,7 +10,7 @@ pub enum Message {
     Select(usize),
 }
 
-pub struct LocationPage {
+pub struct Page {
     cities: Vec<geonames::City>,
     selected_opt: Option<usize>,
     search_id: widget::Id,
@@ -18,12 +18,12 @@ pub struct LocationPage {
     regex_opt: Option<regex::Regex>,
 }
 
-impl LocationPage {
+impl Page {
     pub fn new() -> Self {
         let cities = match geonames::bitcode::decode(CITIES) {
             Ok(ok) => ok,
             Err(err) => {
-                log::warn!("failed to decode cities: {}", err);
+                tracing::warn!(err = err.to_string(), "failed to decode cities");
                 Vec::new()
             }
         };
@@ -35,25 +35,8 @@ impl LocationPage {
             regex_opt: None,
         }
     }
-}
 
-impl page::Page for LocationPage {
-    fn title(&self) -> String {
-        fl!("timezone-and-location")
-    }
-
-    fn completed(&self) -> bool {
-        self.selected_opt.is_some()
-    }
-
-    fn update(&mut self, page_message: page::Message) -> Task<page::Message> {
-        let message = match page_message {
-            page::Message::Open => {
-                return widget::text_input::focus(self.search_id.clone());
-            }
-            page::Message::Location(message) => message,
-            _ => return Task::none(),
-        };
+    pub fn update(&mut self, message: Message) -> Task<page::Message> {
         match message {
             Message::Search(search) => {
                 self.selected_opt = None;
@@ -67,14 +50,42 @@ impl page::Page for LocationPage {
                     {
                         Ok(regex) => self.regex_opt = Some(regex),
                         Err(err) => {
-                            log::warn!("failed to parse regex {:?}: {}", pattern, err);
+                            tracing::warn!(
+                                err = err.to_string(),
+                                "failed to parse regex {:?}",
+                                pattern
+                            );
                         }
                     };
                 }
             }
-            Message::Select(selected) => self.selected_opt = Some(selected),
+            Message::Select(selected) => {
+                self.selected_opt = Some(selected);
+
+                if let Some(city) = self.cities.get(selected) {
+                    eprintln!("selected {city:#?}");
+                }
+            }
         }
         Task::none()
+    }
+}
+
+impl page::Page for Page {
+    fn title(&self) -> String {
+        fl!("timezone-and-location-page")
+    }
+
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn open(&mut self) -> cosmic::Task<page::Message> {
+        return widget::text_input::focus(self.search_id.clone());
+    }
+
+    fn completed(&self) -> bool {
+        self.selected_opt.is_some()
     }
 
     fn view(&self) -> Element<page::Message> {
@@ -140,17 +151,22 @@ impl page::Page for LocationPage {
                 first_opt = Some(i);
             }
         }
-        let mut search_input =
-            widget::search_input(fl!("search-the-closest-major-city"), &self.search)
-                .id(self.search_id.clone())
-                .on_input(Message::Search);
+        let mut search_input = widget::search_input(
+            fl!(
+                "timezone-and-location-page",
+                "search-the-closest-major-city"
+            ),
+            &self.search,
+        )
+        .id(self.search_id.clone())
+        .on_input(Message::Search);
         if self.selected_opt.is_some() {
             // Go to next page if an item is selected
             //TODO: search_input = search_input.on_submit(Message::Next);
         } else if let Some(first) = first_opt {
             if self.regex_opt.is_some() {
                 // Select first item if no item is selected and there is a search
-                search_input = search_input.on_submit(Message::Select(first));
+                search_input = search_input.on_submit(move |_| Message::Select(first));
             }
         }
         let element: Element<_> = widget::column::with_children(vec![
@@ -159,7 +175,7 @@ impl page::Page for LocationPage {
             //TODO: manual height used due to layout issues
             widget::scrollable(section).height(286).into(),
             widget::Space::with_height(space_m).into(),
-            widget::text::body(fl!("geonames-attribution")).into(),
+            widget::text::body(fl!("timezone-and-location-page", "geonames-attribution")).into(),
         ])
         .into();
         element.map(page::Message::Location)

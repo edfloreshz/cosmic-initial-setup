@@ -1,8 +1,9 @@
 use cosmic::{
+    Apply, Element, Task,
     cosmic_config::{Config, CosmicConfigEntry},
     cosmic_theme::{self, ThemeMode},
-    iced::Alignment,
-    theme, widget, Element, Task,
+    iced::{Alignment, Length},
+    theme, widget,
 };
 
 use crate::{fl, page};
@@ -20,14 +21,20 @@ pub enum Message {
     Select(usize),
 }
 
-pub struct AppearancePage {
+impl From<Message> for super::Message {
+    fn from(message: Message) -> Self {
+        super::Message::Appearance(message)
+    }
+}
+
+pub struct Page {
     theme_mode_config: Option<Config>,
     theme_mode: ThemeMode,
     themes: Vec<Theme>,
     selected: usize,
 }
 
-impl AppearancePage {
+impl Page {
     pub fn new() -> Self {
         let mut theme_mode = ThemeMode::default();
         let theme_mode_config = match ThemeMode::config() {
@@ -37,14 +44,14 @@ impl AppearancePage {
                         theme_mode = entry;
                     }
                     Err((err, entry)) => {
-                        log::warn!("errors while loading theme mode: {:?}", err);
+                        tracing::warn!(?err, "errors while loading theme mode");
                         theme_mode = entry;
                     }
                 }
                 Some(config)
             }
             Err(err) => {
-                log::warn!("failed to get theme mode config: {}", err);
+                tracing::warn!(err = err.to_string(), "failed to get theme mode config");
                 None
             }
         };
@@ -65,18 +72,8 @@ impl AppearancePage {
             selected: if theme_mode.is_dark { 0 } else { 1 },
         }
     }
-}
 
-impl page::Page for AppearancePage {
-    fn title(&self) -> String {
-        fl!("personalize-appearance")
-    }
-
-    fn update(&mut self, page_message: page::Message) -> Task<page::Message> {
-        let message = match page_message {
-            page::Message::Appearance(message) => message,
-            _ => return Task::none(),
-        };
+    pub fn update(&mut self, message: Message) -> Task<page::Message> {
         match message {
             Message::Select(index) => {
                 if let Some(config) = &self.theme_mode_config {
@@ -86,18 +83,36 @@ impl page::Page for AppearancePage {
                             self.selected = index;
                         }
                         Err(err) => {
-                            log::warn!("failed to set theme mode: {}", err);
+                            tracing::warn!(err = err.to_string(), "failed to set theme mode");
                         }
                     }
                 }
             }
         }
+
         Task::none()
+    }
+}
+
+impl page::Page for Page {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn title(&self) -> String {
+        fl!("appearance-page")
+    }
+
+    fn skippable(&self) -> bool {
+        true
     }
 
     fn view(&self) -> Element<page::Message> {
         let cosmic_theme::Spacing {
-            space_xxs, space_m, ..
+            space_xxs,
+            space_m,
+            space_xl,
+            ..
         } = theme::active().cosmic().spacing;
 
         let mut grid = widget::grid().column_spacing(space_m).row_spacing(space_m);
@@ -105,21 +120,33 @@ impl page::Page for AppearancePage {
             if i > 0 && i % 3 == 0 {
                 grid = grid.insert_row();
             }
-            grid = grid.push(
-                widget::column::with_children(vec![
-                    widget::button::custom(widget::svg(theme.handle.clone()).width(144).height(81))
-                        .class(theme::Button::Image)
-                        .selected(i == self.selected)
-                        .on_press(Message::Select(i))
-                        .into(),
-                    widget::text::body(&theme.name).into(),
-                ])
+
+            let thumbnail = widget::svg(theme.handle.clone()).width(144).height(81);
+
+            let button = widget::button::custom_image_button(thumbnail, None)
+                .class(theme::Button::Image)
+                .selected(i == self.selected)
+                .on_press(Message::Select(i).into());
+
+            let selection = widget::column::with_capacity(2)
+                .push(button)
+                .push(widget::text::body(&theme.name))
                 .spacing(space_xxs)
-                .align_x(Alignment::Center),
-            );
+                .align_x(Alignment::Center);
+
+            grid = grid.push(selection);
         }
 
-        let element: Element<_> = grid.into();
-        element.map(page::Message::Appearance)
+        let description = widget::text::body(fl!("appearance-page", "description"))
+            .align_x(cosmic::iced::Alignment::Center)
+            .apply(widget::container)
+            .width(Length::Fill);
+
+        widget::column::with_capacity(2)
+            .push(grid)
+            .push(description)
+            .align_x(Alignment::Center)
+            .spacing(space_xl)
+            .into()
     }
 }
